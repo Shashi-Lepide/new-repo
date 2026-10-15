@@ -1,21 +1,23 @@
 import { createServer } from 'node:http';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
-import { promisify } from 'node:util';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const scrypt = promisify(scryptCallback);
+import { createServerClient, parseCookieHeader, serializeCookieHeader } from '@supabase/ssr';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(ROOT, 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const APP_URL = (process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-const SESSION_COOKIE = 'lp_session';
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes('your-project-ref')) {
+  console.error('Set SUPABASE_URL and SUPABASE_ANON_KEY in .env (see .env.example), then restart.');
+  process.exit(1);
+}
+
+const PERSIST_COOKIE = 'lp_persist';
+const PERSIST_MAX_AGE_S = 30 * 24 * 60 * 60;
 const MAX_BODY_BYTES = 10 * 1024;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILED_LOGINS = 10;
@@ -53,80 +55,49 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
 };
 
-const sessions = new Map();
 const failedLogins = new Map();
-let users = await loadUsers();
-let writeQueue = Promise.resolve();
+const COOKIE_DEFAULTS = { path: '/', httpOnly: true, sameSite: 'strict', secure: IS_PRODUCTION };
 
-async function loadUsers() {
-  try {
-    return JSON.parse(await readFile(USERS_FILE, 'utf8'));
-  } catch (error) {
-    if (error.code === 'ENOENT') return [];
-    throw error;
-  }
+function appendSetCookie(res, cookies) {
+  const existing = res.getHeader('Set-Cookie') ?? [];
+  res.setHeader('Set-Cookie', [...[].concat(existing), ...cookies]);
 }
 
-function saveUsers() {
-  writeQueue = writeQueue.then(async () => {
-    await mkdir(DATA_DIR, { recursive: true });
-    const tempFile = `${USERS_FILE}.tmp`;
-    await writeFile(tempFile, JSON.stringify(users, null, 2));
-    await rename(tempFile, USERS_FILE);
+function readCookies(req) {
+  return parseCookieHeader(req.headers.cookie ?? '').map(({ name, value }) => ({ name, value: value ?? '' }));
+}
+
+// Sessions live only in HttpOnly cookies; "persistent" decides between session and 30-day cookies.
+function createSupabase(req, res, persistent = readCookies(req).some(({ name }) => name === PERSIST_COOKIE)) {
+  return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    cookieOptions: COOKIE_DEFAULTS,
+    cookies: {
+      getAll: () => readCookies(req),
+      setAll(cookiesToSet) {
+        appendSetCookie(res, cookiesToSet.map(({ name, value, options }) => {
+          const cookieOptions = { ...options, ...COOKIE_DEFAULTS };
+          if (value && persistent) cookieOptions.maxAge = PERSIST_MAX_AGE_S;
+          if (value && !persistent) {
+            delete cookieOptions.maxAge;
+            delete cookieOptions.expires;
+          }
+          return serializeCookieHeader(name, value, cookieOptions);
+        }));
+      },
+    },
   });
-  return writeQueue;
 }
 
-async function hashPassword(password) {
-  const salt = randomBytes(16);
-  const hash = await scrypt(password, salt, 64);
-  return `${salt.toString('hex')}:${hash.toString('hex')}`;
+function setPersistCookie(res, persistent) {
+  appendSetCookie(res, [serializeCookieHeader(PERSIST_COOKIE, persistent ? '1' : '', {
+    ...COOKIE_DEFAULTS,
+    maxAge: persistent ? PERSIST_MAX_AGE_S : 0,
+  })]);
 }
 
-// Verified against a throwaway hash when the email is unknown, so timing doesn't reveal accounts.
-const DUMMY_HASH = await hashPassword(randomUUID());
-
-async function verifyPassword(password, stored) {
-  const [saltHex, hashHex] = stored.split(':');
-  const expected = Buffer.from(hashHex, 'hex');
-  const actual = await scrypt(password, Buffer.from(saltHex, 'hex'), expected.length);
-  return timingSafeEqual(expected, actual);
-}
-
-function parseCookies(header = '') {
-  return Object.fromEntries(
-    header.split(';').map((part) => part.trim().split('=')).filter(([key]) => key)
-      .map(([key, ...rest]) => [key, decodeURIComponent(rest.join('='))]),
-  );
-}
-
-function getSession(req) {
-  const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-  const session = token && sessions.get(token);
-  if (!session) return null;
-  if (session.expiresAt < Date.now()) {
-    sessions.delete(token);
-    return null;
-  }
-  const user = users.find((candidate) => candidate.id === session.userId);
-  return user ? { token, user } : null;
-}
-
-function startSession(res, userId, remember) {
-  const token = randomBytes(32).toString('base64url');
-  const ttl = remember ? REMEMBER_TTL_MS : SESSION_TTL_MS;
-  sessions.set(token, { userId, expiresAt: Date.now() + ttl });
-  const attributes = ['Path=/', 'HttpOnly', 'SameSite=Strict'];
-  if (remember) attributes.push(`Max-Age=${Math.floor(ttl / 1000)}`);
-  if (IS_PRODUCTION) attributes.push('Secure');
-  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${token}; ${attributes.join('; ')}`);
-}
-
-function clearSession(req, res) {
-  const session = getSession(req);
-  if (session) sessions.delete(session.token);
-  const secure = IS_PRODUCTION ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure}`);
+async function getUser(supabase) {
+  const { data, error } = await supabase.auth.getUser();
+  return error ? null : data.user;
 }
 
 function send(res, status, body, type) {
@@ -218,17 +189,38 @@ async function handleSignup(req, res) {
   if (Object.keys(fields).length) {
     return sendError(res, 400, 'Check the highlighted fields', 'Fix the fields below, then try again.', fields);
   }
-  if (users.some((user) => user.email === email)) {
-    return sendError(res, 409, 'Account already exists', 'Sign in instead, or use a different email.', {
-      email: 'An account with this email already exists.',
-    });
+
+  const supabase = createSupabase(req, res, false);
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { full_name: name }, emailRedirectTo: `${APP_URL}/login` },
+  });
+
+  if (error) {
+    if (error.code === 'user_already_exists' || error.code === 'email_exists') {
+      return sendError(res, 409, 'Account already exists', 'Sign in instead, or use a different email.', {
+        email: 'An account with this email already exists.',
+      });
+    }
+    if (error.code === 'weak_password') {
+      return sendError(res, 400, 'Choose a stronger password', error.message, { password: error.message });
+    }
+    if (error.status === 429) {
+      return sendError(res, 429, 'Too many attempts', 'Wait a few minutes, then try again.');
+    }
+    console.error('Supabase signUp failed:', error.code, error.message);
+    return sendError(res, 502, 'Sign-up failed', 'Try again in a moment.');
   }
 
-  const user = { id: randomUUID(), name, email, passwordHash: await hashPassword(password), createdAt: new Date().toISOString() };
-  users.push(user);
-  await saveUsers();
-  startSession(res, user.id, false);
-  sendJson(res, 201, { redirect: '/app' });
+  if (data.session) {
+    setPersistCookie(res, false);
+    return sendJson(res, 201, { redirect: '/app' });
+  }
+  // Email confirmation is on (or the email is already registered, which Supabase deliberately hides).
+  sendJson(res, 201, {
+    notice: { title: 'Check your email', message: `We sent a confirmation link to ${email}. Open it, then sign in.` },
+  });
 }
 
 async function handleLogin(req, res) {
@@ -240,32 +232,67 @@ async function handleLogin(req, res) {
   const body = await readJsonBody(req);
   const email = asText(body.email).trim().toLowerCase();
   const password = asText(body.password);
-  const user = users.find((candidate) => candidate.email === email);
-  const valid = await verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
+  const remember = body.remember === true;
+  if (!email || !password) {
+    return sendError(res, 400, 'Sign-in details are incomplete', 'Enter your work email and password, then try again.');
+  }
 
-  if (!user || !valid) {
+  const supabase = createSupabase(req, res, remember);
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+  if (error) {
+    if (error.code === 'email_not_confirmed') {
+      return sendError(res, 403, 'Confirm your email', 'Open the confirmation link we emailed you, then sign in.');
+    }
+    if (error.status === 429) {
+      return sendError(res, 429, 'Too many attempts', 'Wait a few minutes, then try again.');
+    }
+    if (error.code !== 'invalid_credentials') console.error('Supabase signIn failed:', error.code, error.message);
     recordFailedLogin(key);
     return sendError(res, 401, 'Sign-in failed', 'The email or password is incorrect. Check them and try again.');
   }
 
   failedLogins.delete(key);
-  startSession(res, user.id, body.remember === true);
+  setPersistCookie(res, remember);
   sendJson(res, 200, { redirect: '/app' });
+}
+
+async function handleMe(req, res) {
+  const supabase = createSupabase(req, res);
+  const user = await getUser(supabase);
+  if (!user) return sendError(res, 401, 'Not signed in', 'Sign in to continue.');
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('full_name, email')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  sendJson(res, 200, {
+    name: profile?.full_name ?? user.user_metadata?.full_name ?? user.email,
+    email: profile?.email ?? user.email,
+  });
+}
+
+async function handleLogout(req, res) {
+  const supabase = createSupabase(req, res);
+  await supabase.auth.signOut();
+  setPersistCookie(res, false);
+  sendJson(res, 200, { redirect: '/login' });
 }
 
 async function handleRequest(req, res) {
   const { pathname } = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
-  const session = getSession(req);
 
   if (req.method === 'GET') {
-    if (pathname === '/') return redirect(res, session ? '/app' : '/login');
-    if (pathname === '/app' && !session) return redirect(res, '/login');
-    if ((pathname === '/login' || pathname === '/signup') && session) return redirect(res, '/app');
-    if (PAGES[pathname]) return sendFile(res, PAGES[pathname], 'text/html; charset=utf-8');
     if (ASSETS[pathname]) return sendFile(res, ASSETS[pathname].file, ASSETS[pathname].type);
-    if (pathname === '/api/me') {
-      if (!session) return sendError(res, 401, 'Not signed in', 'Sign in to continue.');
-      return sendJson(res, 200, { name: session.user.name, email: session.user.email });
+    if (pathname === '/api/me') return handleMe(req, res);
+    if (pathname === '/' || PAGES[pathname]) {
+      const signedIn = Boolean(await getUser(createSupabase(req, res)));
+      if (pathname === '/') return redirect(res, signedIn ? '/app' : '/login');
+      if (pathname === '/app' && !signedIn) return redirect(res, '/login');
+      if ((pathname === '/login' || pathname === '/signup') && signedIn) return redirect(res, '/app');
+      return sendFile(res, PAGES[pathname], 'text/html; charset=utf-8');
     }
   }
 
@@ -273,10 +300,7 @@ async function handleRequest(req, res) {
     if (!isTrustedApiRequest(req)) return sendError(res, 403, 'Request blocked', 'Reload the page and try again.');
     if (pathname === '/api/signup') return handleSignup(req, res);
     if (pathname === '/api/login') return handleLogin(req, res);
-    if (pathname === '/api/logout') {
-      clearSession(req, res);
-      return sendJson(res, 200, { redirect: '/login' });
-    }
+    if (pathname === '/api/logout') return handleLogout(req, res);
   }
 
   send(res, 404, 'Not found', 'text/plain; charset=utf-8');
@@ -294,7 +318,6 @@ const server = createServer((req, res) => {
 
 setInterval(() => {
   const now = Date.now();
-  for (const [token, session] of sessions) if (session.expiresAt < now) sessions.delete(token);
   for (const [key, entry] of failedLogins) if (entry.resetAt < now) failedLogins.delete(key);
 }, 60 * 1000).unref();
 

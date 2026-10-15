@@ -60,6 +60,16 @@ function showFormMessage(form, title, body) {
 function hideFormMessage(form) {
   const message = form.querySelector('[data-form-message]');
   if (message) message.hidden = true;
+  const notice = form.querySelector('[data-form-notice]');
+  if (notice) notice.hidden = true;
+}
+
+function showFormNotice(form, title, body) {
+  const notice = form.querySelector('[data-form-notice]');
+  if (!notice) return;
+  notice.querySelector('.lp-message__title').textContent = title;
+  notice.querySelector('.lp-message__body').textContent = body;
+  notice.hidden = false;
 }
 
 const validators = {
@@ -121,6 +131,11 @@ async function submitAuthForm(event) {
 
     if (response.ok && result.redirect) {
       window.location.assign(result.redirect);
+      return;
+    }
+    if (response.ok && result.notice) {
+      form.reset();
+      showFormNotice(form, result.notice.title, result.notice.message);
       return;
     }
 
