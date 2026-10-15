@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Create your Lepide account</title>
+  <link rel="stylesheet" href="https://lepide-design-system.vercel.app/v1/lepidus.css">
+  <link rel="stylesheet" href="/assets/layout.css">
+</head>
+<body>
+  <div class="auth-page">
+    <div class="theme-switcher">
+      <div class="lp-dropdown lp-dropdown--full-width" data-lp-dropdown="single" data-theme-switcher>
+        <button class="lp-dropdown__trigger" aria-expanded="false" aria-haspopup="listbox">
+          <span class="lp-dropdown__trigger-label">light</span>
+          <svg class="lp-dropdown__chevron" viewBox="0 0 12 6" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 1l5 4 5-4"/></svg>
+        </button>
+        <div class="lp-dropdown__panel" hidden>
+          <div class="lp-dropdown__header">
+            <span class="lp-dropdown__header-label">Theme</span>
+            <svg class="lp-dropdown__chevron lp-dropdown__chevron--open" viewBox="0 0 12 6" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M1 1l5 4 5-4"/></svg>
+          </div>
+          <div class="lp-dropdown__list" role="listbox" aria-label="Theme">
+            <button class="lp-dropdown__option" role="option">
+              <span class="lp-dropdown__option-label">light</span>
+            </button>
+            <button class="lp-dropdown__option" role="option">
+              <span class="lp-dropdown__option-label">dark</span>
+            </button>
+            <button class="lp-dropdown__option" role="option">
+              <span class="lp-dropdown__option-label">hc</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <main class="auth-main">
+      <div class="auth-content">
+        <header class="auth-intro">
+          <img src="https://lepide-design-system.vercel.app/v1/brand/lepide-mark.svg"
+               width="40" height="40" alt="Lepide">
+          <h1 class="auth-title">Create your Lepide account</h1>
+        </header>
+
+        <div class="lp-card">
+          <div class="lp-card__body">
+            <form class="auth-form" novalidate data-auth-form data-endpoint="/api/signup"
+                  data-incomplete-title="Account details are incomplete"
+                  data-incomplete-body="Fix the highlighted fields, then try again.">
+              <div class="lp-input lp-input--full-width">
+                <div class="lp-input__row lp-input__row--label-top">
+                  <label class="lp-input__label" for="name">Full name</label>
+                  <div class="lp-input__field">
+                    <input class="lp-input__input" id="name" name="name" type="text"
+                           autocomplete="name" required maxlength="100" aria-invalid="false"
+                           data-validate="name" data-payload>
+                  </div>
+                </div>
+                <div class="lp-input__message lp-input__message--error" id="name-error" hidden></div>
+              </div>
+
+              <div class="lp-input lp-input--full-width">
+                <div class="lp-input__row lp-input__row--label-top">
+                  <label class="lp-input__label" for="email">Email</label>
+                  <div class="lp-input__field">
+                    <input class="lp-input__input" id="email" name="email" type="email"
+                           autocomplete="email" required aria-invalid="false"
+                           aria-describedby="email-hint" data-hint="email-hint"
+                           data-validate="email" data-payload>
+                  </div>
+                </div>
+                <div class="lp-input__message" id="email-hint">Use your work email</div>
+                <div class="lp-input__message lp-input__message--error" id="email-error" hidden></div>
+              </div>
+
+              <div class="lp-input lp-input--full-width">
+                <div class="lp-input__row lp-input__row--label-top">
+                  <label class="lp-input__label" for="password">Password</label>
+                  <div class="lp-input__field">
+                    <input class="lp-input__input" id="password" name="password" type="password"
+                           autocomplete="new-password" required minlength="12" maxlength="128"
+                           aria-invalid="false" aria-describedby="password-hint"
+                           data-hint="password-hint" data-min-length="12"
+                           data-validate="password" data-payload>
+                  </div>
+                </div>
+                <div class="lp-input__message" id="password-hint">Use at least 12 characters</div>
+                <div class="lp-input__message lp-input__message--error" id="password-error" hidden></div>
+              </div>
+
+              <div class="lp-input lp-input--full-width">
+                <div class="lp-input__row lp-input__row--label-top">
+                  <label class="lp-input__label" for="confirm">Confirm password</label>
+                  <div class="lp-input__field">
+                    <input class="lp-input__input" id="confirm" name="confirm" type="password"
+                           autocomplete="new-password" required aria-invalid="false"
+                           data-validate="confirm">
+                  </div>
+                </div>
+                <div class="lp-input__message lp-input__message--error" id="confirm-error" hidden></div>
+              </div>
+
+              <div class="lp-message lp-message--error" role="alert" data-form-message hidden>
+                <span class="lp-message__icon">
+                  <svg viewBox="0 0 45 45" fill="none" aria-hidden="true">
+                    <rect x="2" y="2" width="41" height="41" rx="10" stroke="currentColor" stroke-width="3"/>
+                    <path d="M22.5 12 33 31.5H12L22.5 12Z" stroke="currentColor" stroke-width="2.4"
+                          stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M22.5 20v5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+                    <circle cx="22.5" cy="28.5" r="1.2" fill="currentColor"/>
+                  </svg>
+                </span>
+                <div class="lp-message__content">
+                  <div class="lp-message__text">
+                    <h3 class="lp-message__title">Account details are incomplete</h3>
+                    <p class="lp-message__body">Fix the highlighted fields, then try again.</p>
+                  </div>
+                </div>
+              </div>
+
+              <button class="lp-button lp-button--primary lp-button--md lp-button--full-width" type="submit">
+                Create account
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <p class="auth-support">
+          Already have an account? <a class="lp-link lp-link--inline" href="/login">Sign in</a>
+        </p>
+      </div>
+    </main>
+  </div>
+
+  <script src="https://lepide-design-system.vercel.app/v1/lepidus.js" defer></script>
+  <script src="/assets/auth.js" defer></script>
+</body>
+</html>

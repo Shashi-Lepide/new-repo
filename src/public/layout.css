@@ -1,0 +1,79 @@
+/* Token-only layout wrappers; never targets .lp-* selectors. */
+body {
+  margin: 0;
+}
+
+.auth-page {
+  min-height: 100vh;
+  background: var(--color-background-page);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-primary);
+}
+
+.theme-switcher {
+  position: fixed;
+  inset-block-start: var(--space-9);
+  inset-inline-end: var(--space-9);
+  inline-size: min(
+    calc(100vw - var(--space-9) - var(--space-9)),
+    calc(var(--space-14) * 5)
+  );
+  z-index: var(--z-dropdown);
+}
+
+.auth-main {
+  box-sizing: border-box;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: calc(var(--space-14) + var(--space-9)) var(--space-9) var(--space-9);
+}
+
+.auth-content {
+  display: grid;
+  inline-size: 100%;
+  max-inline-size: calc(var(--space-14) * 7);
+  gap: var(--space-8);
+}
+
+.auth-intro {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-5);
+  text-align: center;
+}
+
+.auth-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--typography-heading-h1-fontSize);
+  line-height: var(--typography-heading-h1-lineHeight);
+  font-weight: var(--font-weight-bold);
+}
+
+.auth-form {
+  display: grid;
+  gap: var(--space-8);
+}
+
+.auth-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+
+.auth-support {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--typography-body-md-fontSize);
+  line-height: var(--typography-body-md-lineHeight);
+  text-align: center;
+}
+
+.account-details {
+  margin: 0;
+  font-size: var(--typography-body-md-fontSize);
+  line-height: var(--typography-body-md-lineHeight);
+}
