@@ -1,20 +1,17 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { createServerClient, parseCookieHeader, serializeCookieHeader } from '@supabase/ssr';
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const APP_URL = (process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const CONFIG_ERROR = !SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes('your-project-ref')
+  ? 'SUPABASE_URL and SUPABASE_ANON_KEY are not set. Add them to .env locally, or to the Vercel project environment variables.'
+  : null;
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes('your-project-ref')) {
-  console.error('Set SUPABASE_URL and SUPABASE_ANON_KEY in .env (see .env.example), then restart.');
-  process.exit(1);
-}
+if (CONFIG_ERROR) console.error(CONFIG_ERROR);
 
 const PERSIST_COOKIE = 'lp_persist';
 const PERSIST_MAX_AGE_S = 30 * 24 * 60 * 60;
@@ -25,15 +22,23 @@ const PASSWORD_MIN = 12;
 const PASSWORD_MAX = 128;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Literal new URL(...) paths let Vercel's bundler detect and ship these files.
+const HTML = 'text/html; charset=utf-8';
 const PAGES = {
-  '/login': 'src/pages/login.html',
-  '/signup': 'src/pages/signup.html',
-  '/app': 'src/pages/home.html',
+  '/login': { body: readFileSync(new URL('./src/pages/login.html', import.meta.url)), type: HTML },
+  '/signup': { body: readFileSync(new URL('./src/pages/signup.html', import.meta.url)), type: HTML },
+  '/app': { body: readFileSync(new URL('./src/pages/home.html', import.meta.url)), type: HTML },
 };
 
 const ASSETS = {
-  '/assets/auth.js': { file: 'src/public/auth.js', type: 'text/javascript; charset=utf-8' },
-  '/assets/layout.css': { file: 'src/public/layout.css', type: 'text/css; charset=utf-8' },
+  '/assets/auth.js': {
+    body: readFileSync(new URL('./src/public/auth.js', import.meta.url)),
+    type: 'text/javascript; charset=utf-8',
+  },
+  '/assets/layout.css': {
+    body: readFileSync(new URL('./src/public/layout.css', import.meta.url)),
+    type: 'text/css; charset=utf-8',
+  },
 };
 
 const DESIGN_SYSTEM_ORIGIN = 'https://lepide-design-system.vercel.app';
@@ -118,8 +123,8 @@ function redirect(res, location) {
   res.end();
 }
 
-async function sendFile(res, relativePath, type) {
-  send(res, 200, await readFile(path.join(ROOT, relativePath)), type);
+function sendFile(res, file) {
+  send(res, 200, file.body, file.type);
 }
 
 function readJsonBody(req) {
@@ -154,6 +159,9 @@ function isTrustedApiRequest(req) {
 }
 
 function clientKey(req) {
+  // On Vercel every request arrives via the proxy, so the client IP is in x-forwarded-for.
+  const forwarded = req.headers['x-forwarded-for'];
+  if (process.env.VERCEL && typeof forwarded === 'string') return forwarded.split(',')[0].trim();
   return req.socket.remoteAddress ?? 'unknown';
 }
 
@@ -282,17 +290,18 @@ async function handleLogout(req, res) {
 }
 
 async function handleRequest(req, res) {
+  if (CONFIG_ERROR) return sendError(res, 500, 'Server not configured', CONFIG_ERROR);
   const { pathname } = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
 
   if (req.method === 'GET') {
-    if (ASSETS[pathname]) return sendFile(res, ASSETS[pathname].file, ASSETS[pathname].type);
+    if (ASSETS[pathname]) return sendFile(res, ASSETS[pathname]);
     if (pathname === '/api/me') return handleMe(req, res);
     if (pathname === '/' || PAGES[pathname]) {
       const signedIn = Boolean(await getUser(createSupabase(req, res)));
       if (pathname === '/') return redirect(res, signedIn ? '/app' : '/login');
       if (pathname === '/app' && !signedIn) return redirect(res, '/login');
       if ((pathname === '/login' || pathname === '/signup') && signedIn) return redirect(res, '/app');
-      return sendFile(res, PAGES[pathname], 'text/html; charset=utf-8');
+      return sendFile(res, PAGES[pathname]);
     }
   }
 
@@ -306,21 +315,24 @@ async function handleRequest(req, res) {
   send(res, 404, 'Not found', 'text/plain; charset=utf-8');
 }
 
-const server = createServer((req, res) => {
-  handleRequest(req, res).catch((error) => {
+export default function handler(req, res) {
+  return handleRequest(req, res).catch((error) => {
     const status = error.status ?? 500;
     if (status === 500) console.error(error);
     if (!res.headersSent) {
       sendError(res, status, 'Something went wrong', status === 500 ? 'Try again in a moment.' : error.message);
     }
   });
-});
+}
 
 setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of failedLogins) if (entry.resetAt < now) failedLogins.delete(key);
 }, 60 * 1000).unref();
 
-server.listen(PORT, () => {
-  console.log(`Lepide auth running at http://localhost:${PORT}`);
-});
+// Vercel imports the handler via api/index.js; only listen when run directly with node.
+if (!process.env.VERCEL) {
+  createServer(handler).listen(PORT, () => {
+    console.log(`Lepide auth running at http://localhost:${PORT}`);
+  });
+}
