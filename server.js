@@ -291,7 +291,9 @@ async function handleLogout(req, res) {
 
 async function handleRequest(req, res) {
   if (CONFIG_ERROR) return sendError(res, 500, 'Server not configured', CONFIG_ERROR);
-  const { pathname } = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+  const requestUrl = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
+  // Vercel rewrites can pass the original path in ?route=/original/path.
+  const pathname = requestUrl.searchParams.get('route') || requestUrl.pathname;
 
   if (req.method === 'GET') {
     if (ASSETS[pathname]) return sendFile(res, ASSETS[pathname]);
